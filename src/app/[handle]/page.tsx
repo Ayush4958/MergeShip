@@ -4,6 +4,7 @@ import { cacheGet, cacheSet } from '@/lib/cache';
 import Link from 'next/link';
 import { ExternalLink, ArrowLeft } from 'lucide-react';
 import { CopyButton } from '@/components/copy-button';
+import { ActivityHeatmap } from './activity-heatmap';
 
 export const revalidate = 300;
 
@@ -74,10 +75,11 @@ type ProfileData = {
   timeline: TimelineEvent[];
   orgs: OrgEntry[];
   activeTasks: ActiveTask[];
+  activityCounts: { date: string; count: number }[];
 };
 
 async function loadProfileData(handle: string): Promise<ProfileData | null> {
-  const cacheKey = `profile:v2:${handle}`;
+  const cacheKey = `profile:v3:${handle}`;
   const cached = await cacheGet<ProfileData>(cacheKey);
   if (cached) {
     const { getPublicStreak } = await import('@/app/actions/streak');
@@ -95,6 +97,9 @@ async function loadProfileData(handle: string): Promise<ProfileData | null> {
 
   if (!profile) return null;
 
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
   // Fetch all data in parallel
   const [
     prsResult,
@@ -103,6 +108,7 @@ async function loadProfileData(handle: string): Promise<ProfileData | null> {
     claimedRecsResult,
     recentPRsResult,
     recentRecsResult,
+    activityLogResult,
   ] = await Promise.all([
     // Merged PRs count
     service
@@ -148,6 +154,14 @@ async function loadProfileData(handle: string): Promise<ProfileData | null> {
       .in('status', ['claimed', 'completed'])
       .order('claimed_at', { ascending: false })
       .limit(5),
+
+    // Activity log for heatmap (last 90 days)
+    service
+      .from('activity_log')
+      .select('created_at')
+      .eq('user_id', profile.id)
+      .in('kind', ['pr_merged', 'mentor_comment', 'help_request_resolved', 'help_request_claimed'])
+      .gte('created_at', ninetyDaysAgo.toISOString()),
   ]);
 
   const prsMerged = prsResult.count ?? 0;
@@ -171,6 +185,13 @@ async function loadProfileData(handle: string): Promise<ProfileData | null> {
       difficulty: r.difficulty,
     };
   });
+
+  const countsMap = new Map<string, number>();
+  for (const row of activityLogResult.data ?? []) {
+    const day = row.created_at.split('T')[0];
+    countsMap.set(day, (countsMap.get(day) || 0) + 1);
+  }
+  const activityCounts = Array.from(countsMap.entries()).map(([date, count]) => ({ date, count }));
 
   // Build timeline from PRs + recommendations
   const timelineEvents: TimelineEvent[] = [];
@@ -264,6 +285,7 @@ async function loadProfileData(handle: string): Promise<ProfileData | null> {
     timeline,
     orgs,
     activeTasks,
+    activityCounts,
   };
 
   await cacheSet(cacheKey, data, 300);
@@ -510,6 +532,8 @@ export default async function PublicProfile({ params }: { params: { handle: stri
                 </div>
               </div>
             </div>
+
+            <ActivityHeatmap data={profile.activityCounts} />
           </div>
 
           {/* Right: Orgs + Active Tasks */}
