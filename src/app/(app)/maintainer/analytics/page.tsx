@@ -6,6 +6,7 @@ import {
   getQueueSignalQuality,
   getTimeSaved,
   getRepoAnalyticsBreakdown,
+  getAnalyticsStats,
 } from '@/app/actions/maintainer';
 import type { MaintainerInstall } from '@/lib/maintainer/detect';
 import { isOk } from '@/lib/result';
@@ -13,6 +14,8 @@ import TimeSavedPanel from './time-saved-panel';
 import { RepoBreakdownTable } from './repo-breakdown-table';
 import RangeTabs from './range-tabs';
 import QueueSignalPanel from './queue-signal-panel';
+import { StatsHeader } from './stats-header';
+import SummaryBanner from './summary-banner';
 import type { AnalyticsRange } from '@/lib/maintainer/time-saved';
 
 export const dynamic = 'force-dynamic';
@@ -65,10 +68,11 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
       ? rawRange
       : '30d';
 
-  const [timeSavedRes, repoAnalyticsRes, queueSignalRes] = await Promise.all([
+  const [timeSavedRes, repoAnalyticsRes, queueSignalRes, statsRes] = await Promise.all([
     getTimeSaved(activeInstallId, range),
     getRepoAnalyticsBreakdown(activeInstallId, range),
     getQueueSignalQuality(activeInstallId, range),
+    getAnalyticsStats(activeInstallId, range),
   ]);
 
   const timeSaved = isOk(timeSavedRes)
@@ -92,6 +96,17 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
         total: 0,
       };
 
+  const stats = isOk(statsRes)
+    ? statsRes.data
+    : {
+        prsMerged: { value: 0, delta: 0, deltaPositiveIsGood: true },
+        avgReviewTimeHours: { value: 0, delta: 0, deltaPositiveIsGood: false },
+        queueSignalRate: { value: 0, delta: 0, deltaPositiveIsGood: true },
+        aiPrsBlocked: { value: 0, delta: 0, deltaPositiveIsGood: true },
+        contributorsLeveledUp: { value: 0, delta: 0, deltaPositiveIsGood: true },
+        maintainerTimeSavedHours: { value: 0, delta: 0, deltaPositiveIsGood: true },
+      };
+
   return (
     <div className="min-h-screen bg-zinc-950 px-6 py-12 text-white">
       <div className="mx-auto max-w-6xl">
@@ -101,6 +116,8 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
             <RangeTabs currentRange={range} />
           </div>
         </header>
+
+        <StatsHeader stats={stats} />
 
         <div className="grid gap-8 lg:grid-cols-3">
           <div className="lg:col-span-1">
@@ -118,6 +135,8 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
             </div>
           </div>
         </div>
+
+        <SummaryBanner stats={stats} range={range} installationId={activeInstallId} />
       </div>
     </div>
   );
