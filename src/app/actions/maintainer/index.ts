@@ -5,6 +5,7 @@ export type {
   QueueSignalQuality,
   AnalyticsStat,
   AnalyticsStats,
+  PrVolumeBucket,
 } from './analytics';
 export type { ContributorListRow, ContributorStats } from './contributors';
 export type { FailedWebhookEventRow } from './failed-events';
@@ -190,6 +191,12 @@ export async function getMaintainerAnalyticsTrends(
   return analyticsActions.getMaintainerAnalyticsTrends(...args);
 }
 
+export async function getMaintainerDashboardStats(
+  ...args: Parameters<typeof analyticsActions.getMaintainerDashboardStats>
+): ReturnType<typeof analyticsActions.getMaintainerDashboardStats> {
+  return analyticsActions.getMaintainerDashboardStats(...args);
+}
+
 export async function exportPrQueueCsv(
   ...args: Parameters<typeof analyticsActions.exportPrQueueCsv>
 ): ReturnType<typeof analyticsActions.exportPrQueueCsv> {
@@ -260,4 +267,10 @@ export async function getAnalyticsStats(
   ...args: Parameters<typeof analyticsActions.getAnalyticsStats>
 ): ReturnType<typeof analyticsActions.getAnalyticsStats> {
   return analyticsActions.getAnalyticsStats(...args);
+}
+
+export async function getPrVolumeTimeSeries(
+  ...args: Parameters<typeof analyticsActions.getPrVolumeTimeSeries>
+): ReturnType<typeof analyticsActions.getPrVolumeTimeSeries> {
+  return analyticsActions.getPrVolumeTimeSeries(...args);
 }
