@@ -61,6 +61,7 @@ function createMockChain(data: unknown = [], singleData: unknown = null) {
     limit: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
     values: vi.fn().mockReturnThis(),
+    onConflictDoNothing: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
@@ -78,28 +79,24 @@ describe('Mentorship Chat Server Actions', () => {
   });
 
   describe('validateMentorshipRelationship', () => {
-    it('allows Level 2 to guide Level 1', () => {
-      const { isValid } = validateMentorshipRelationship(2, 1);
+    it('allows Level 2 to guide Level 1', async () => {
+      const { isValid } = await validateMentorshipRelationship(2, 1);
       expect(isValid).toBe(true);
     });
-
-    it('allows Level 3 to guide Level 2', () => {
-      const { isValid } = validateMentorshipRelationship(3, 2);
+    it('allows Level 3 to guide Level 2', async () => {
+      const { isValid } = await validateMentorshipRelationship(3, 2);
       expect(isValid).toBe(true);
     });
-
-    it('disallows Level 1 to guide Level 2', () => {
-      const { isValid } = validateMentorshipRelationship(1, 2);
+    it('disallows Level 1 to guide Level 2', async () => {
+      const { isValid } = await validateMentorshipRelationship(1, 2);
       expect(isValid).toBe(true); // Since it automatically resolves higher as mentor
     });
-
-    it('disallows Level 1 to guide Level 1', () => {
-      const { isValid } = validateMentorshipRelationship(1, 1);
+    it('disallows Level 1 to guide Level 1', async () => {
+      const { isValid } = await validateMentorshipRelationship(1, 1);
       expect(isValid).toBe(false);
     });
-
-    it('disallows Level 0 mentor even if difference exists', () => {
-      const { isValid } = validateMentorshipRelationship(1, 0);
+    it('disallows Level 0 mentor even if difference exists', async () => {
+      const { isValid } = await validateMentorshipRelationship(1, 0);
       expect(isValid).toBe(false); // Mentor must be level >= 2
     });
   });
@@ -137,6 +134,40 @@ describe('Mentorship Chat Server Actions', () => {
         ok({ user: { id: 'user-mentor' } } as any),
       );
 
+      let selectCallCount = 0;
+      mockSelect.mockImplementation(() => {
+        const chain = createMockChain();
+        chain.then = (resolve: any) => {
+          selectCallCount++;
+          if (selectCallCount === 1) {
+            // self profile
+            resolve([{ id: 'user-mentor', level: 3 }]);
+          } else if (selectCallCount === 2) {
+            // other profile
+            resolve([{ id: 'user-mentee', level: 2 }]);
+          } else {
+            // channel search after insert conflict
+            resolve([{ id: 'existing-channel-id' }]);
+          }
+        };
+        return chain;
+      });
+
+      // Insert conflicts (channel already exists) → no row returned.
+      mockInsert.mockImplementation(() => createMockChain([]));
+
+      const res = await getOrCreateChatChannel('user-mentee');
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.data.channelId).toBe('existing-channel-id');
+      }
+    });
+
+    it('returns new channel id immediately on a fresh insert (no conflict fallback)', async () => {
+      vi.mocked(actionAuth.requireUser).mockResolvedValue(
+        ok({ user: { id: 'user-mentor' } } as any),
+      );
+
       let callCount = 0;
       mockSelect.mockImplementation(() => {
         const chain = createMockChain();
@@ -145,22 +176,27 @@ describe('Mentorship Chat Server Actions', () => {
           if (callCount === 1) {
             // self profile
             resolve([{ id: 'user-mentor', level: 3 }]);
-          } else if (callCount === 2) {
+          } else {
             // other profile
             resolve([{ id: 'user-mentee', level: 2 }]);
-          } else {
-            // channel search
-            resolve([{ id: 'existing-channel-id' }]);
           }
         };
         return chain;
       });
 
+      mockInsert.mockImplementation(() => {
+        // Fresh insert succeeds — onConflictDoNothing returns the new row.
+        return createMockChain([{ id: 'fresh-channel-id' }]);
+      });
+
       const res = await getOrCreateChatChannel('user-mentee');
       expect(res.ok).toBe(true);
       if (res.ok) {
-        expect(res.data.channelId).toBe('existing-channel-id');
+        expect(res.data.channelId).toBe('fresh-channel-id');
       }
+      // Only the two profile lookups ran — the conflict fallback select
+      // must not fire when the insert path short-circuits.
+      expect(mockSelect).toHaveBeenCalledTimes(2);
     });
   });
 
