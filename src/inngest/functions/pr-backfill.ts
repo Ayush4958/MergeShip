@@ -215,9 +215,17 @@ async function backfillSingleRepo(
           base: { repo: { full_name: repoFullName } },
         };
 
-        const classification = aiDetectionEnabled
-          ? await classifyPrAsAi({ title: ingestible.title, body: ingestible.body })
-          : { flagged: false, reason: null };
+        let classification = { flagged: false, reason: null as string | null };
+        if (aiDetectionEnabled) {
+          try {
+            classification = await classifyPrAsAi({
+              title: ingestible.title,
+              body: ingestible.body,
+            });
+          } catch (e) {
+            errors.push(`classifyPr #${pr.number}: ${(e as Error).message}`);
+          }
+        }
 
         const row = buildPrRow(
           ingestible,
@@ -258,6 +266,7 @@ async function backfillSingleRepo(
     await clearSyncCursor(installationId, repoFullName, 'pull_requests');
   } catch (e) {
     errors.push(`pulls.list: ${(e as Error).message}`);
+    await clearSyncCursor(installationId, repoFullName, 'pull_requests');
   }
 
   return { repo: repoFullName, prs: totalUpserts, errors: errors.slice(0, 10) };
