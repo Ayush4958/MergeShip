@@ -12,18 +12,50 @@ vi.mock('@/lib/cache', () => ({
   cacheSet: vi.fn(),
 }));
 
+const applyFilters = (rows: unknown, filters: Array<['eq' | 'is', string, unknown]>): unknown => {
+  if (!Array.isArray(rows)) return rows;
+  let filtered = rows as Array<Record<string, unknown>>;
+  for (const [op, col, val] of filters) {
+    if (col.startsWith('github_installations.')) {
+      const field = col.split('.')[1] as string;
+      filtered = filtered.filter((r) => {
+        const install = r.github_installations;
+        const joined = (Array.isArray(install) ? install[0] : install) as
+          | Record<string, unknown>
+          | null
+          | undefined;
+        if (op === 'is') {
+          if (val === null) return !!joined && joined[field] === null;
+          return !!joined && joined[field] === val;
+        }
+        if (!joined) return val === null ? false : true;
+        return joined[field] === val;
+      });
+    }
+  }
+  return filtered;
+};
+
 const mockSupabase = (mockTables: Record<string, unknown>) => {
   const mockClient = {
     from: vi.fn().mockImplementation((table: string) => {
+      const filters: Array<['eq' | 'is', string, unknown]> = [];
       const chain = {
         select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockImplementation((col: string, val: unknown) => {
+          filters.push(['eq', col, val]);
+          return chain;
+        }),
+        is: vi.fn().mockImplementation((col: string, val: unknown) => {
+          filters.push(['is', col, val]);
+          return chain;
+        }),
         limit: vi.fn().mockReturnThis(),
         maybeSingle: vi.fn().mockImplementation(() => {
-          return Promise.resolve({ data: (mockTables[table] as unknown) ?? null });
+          return Promise.resolve({ data: applyFilters(mockTables[table], filters) ?? null });
         }),
         then: function (resolve: (value: unknown) => void) {
-          resolve({ data: (mockTables[table] as unknown) ?? null });
+          resolve({ data: applyFilters(mockTables[table], filters) ?? null });
         },
       };
       return chain;
@@ -92,13 +124,13 @@ describe('isUserMaintainer', () => {
     expect(cacheSet).toHaveBeenCalledWith('maint:status:user1', false, 3600);
   });
 
-  it('returns false when service client is not configured', async () => {
+  it('returns false when service client is not configured (without caching the denial)', async () => {
     vi.mocked(cacheGet).mockResolvedValue(null);
     vi.mocked(getServiceSupabase).mockReturnValue(null);
 
     const result = await isUserMaintainer('user1');
     expect(result).toBe(false);
-    expect(cacheSet).toHaveBeenCalledWith('maint:status:user1', false, 3600);
+    expect(cacheSet).not.toHaveBeenCalled();
   });
 
   it('returns cached result when cache is warm (should not hit DB)', async () => {
